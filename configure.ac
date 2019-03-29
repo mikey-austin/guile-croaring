@@ -3,10 +3,14 @@
 
 AC_PREREQ([2.69])
 AC_INIT([guile-croaring], [0.0.1], [mikey@jackiemclean.net])
+LT_INIT
+AM_INIT_AUTOMAKE
+
 AC_CONFIG_SRCDIR([src/roaring.h])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIRS([m4])
-LT_INIT
+
+AC_CONFIG_FILES([Makefile src/Makefile])
 
 # Checks for programs.
 AC_PROG_CC

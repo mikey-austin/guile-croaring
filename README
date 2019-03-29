@@ -1,0 +1,28 @@
+guile-croaring
+--------------
+
+guile-croaring aims to provide a Guile Scheme extension in order to make use of
+the CRoaring [1] compressed bitmap/bitset library from Scheme.
+
+This project provides a shared library artifact suitable for dynamically loading
+into a guile interpreter. The produced shared library bundles the amalgamated
+CRoaring source code, so no separate installation of CRoaring is necessary. There
+does not seem to be any standard widely distributed packages of CRoaring (eg in
+the fedora/centos repositories, etc.) thus the actual guile extension approach. Had
+there been a "suitably available" CRoaring OS package distribution a guile dynamic
+FFI approach would have been preferred to avoid all of the C glue.
+
+This project uses the autotools build system; specifically the trinity of automake,
+libtool and autoconf. As there are no distributed tarballs yet, a recent version
+of the aforementioned autotools programs must be installed in order to build. The
+following is usually enough to get started:
+
+  $ autoreconf -i
+  ...
+  $ ./configure
+  $ make
+
+See the included INSTALL file for more details. Further instructions on how to use
+the resulting extension with guile will come.
+
+[1] https://github.com/RoaringBitmap/CRoaring

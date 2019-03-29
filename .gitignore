@@ -4,3 +4,14 @@ config.h
 config.log
 config.status
 configure
+Makefile.in
+compile
+depcomp
+missing
+.deps
+.libs
+Makefile
+*.la
+*.lo
+*.o
+stamp-h1
