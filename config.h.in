@@ -26,6 +26,9 @@
    and to 0 otherwise. */
 #undef HAVE_REALLOC
 
+/* Define to 1 if you have the `scm_c_define_gsubr' function. */
+#undef HAVE_SCM_C_DEFINE_GSUBR
+
 /* Define to 1 if you have the <stddef.h> header file. */
 #undef HAVE_STDDEF_H
 
