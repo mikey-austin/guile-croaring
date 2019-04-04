@@ -1,4 +1,4 @@
-/* auto-generated on Fri Mar 29 02:09:43 CET 2019. Do not edit! */
+/* Originally auto-generated on Fri Mar 29 02:09:43 CET 2019. */
 #include "roaring.h"
 
 /* used for http://dmalloc.com/ Dmalloc - Debug Malloc Library */
@@ -13,6 +13,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * We include libguile here in order to get access to the guile GC-aware
+ * memory allocation functions. Note that we don't pass a size to the
+ * `scm_gc_free' function, which means we are only compatible with guile
+ * 2.x and greater that support this.
+ */
+#include <libguile.h>
+
+#define GUILE_ALLOC_NAME "croaring"
 
 extern inline int32_t binarySearch(const uint16_t *array, int32_t lenarray,
                                    uint16_t ikey);
@@ -2904,16 +2914,16 @@ extern inline bool array_container_full(const array_container_t *array);
 array_container_t *array_container_create_given_capacity(int32_t size) {
     array_container_t *container;
 
-    if ((container = (array_container_t *)malloc(sizeof(array_container_t))) ==
+    if ((container = (array_container_t *)scm_gc_malloc(sizeof(array_container_t), GUILE_ALLOC_NAME)) ==
         NULL) {
         return NULL;
     }
 
     if( size <= 0 ) { // we don't want to rely on malloc(0)
         container->array = NULL;
-    } else if ((container->array = (uint16_t *)malloc(sizeof(uint16_t) * size)) ==
+    } else if ((container->array = (uint16_t *)scm_gc_malloc_pointerless(sizeof(uint16_t) * size, GUILE_ALLOC_NAME)) ==
         NULL) {
-        free(container);
+        scm_gc_free(container, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
 
@@ -2956,15 +2966,18 @@ array_container_t *array_container_clone(const array_container_t *src) {
 int array_container_shrink_to_fit(array_container_t *src) {
     if (src->cardinality == src->capacity) return 0;  // nothing to do
     int savings = src->capacity - src->cardinality;
+    int old_capacity = src->capacity;
     src->capacity = src->cardinality;
     if( src->capacity == 0) { // we do not want to rely on realloc for zero allocs
-      free(src->array);
+      scm_gc_free(src->array, 0, GUILE_ALLOC_NAME);
       src->array = NULL;
     } else {
       uint16_t *oldarray = src->array;
       src->array =
-        (uint16_t *)realloc(oldarray, src->capacity * sizeof(uint16_t));
-      if (src->array == NULL) free(oldarray);  // should never happen?
+        (uint16_t *)scm_gc_realloc(
+            oldarray, old_capacity * sizeof(uint16_t),
+            src->capacity * sizeof(uint16_t), GUILE_ALLOC_NAME);
+      if (src->array == NULL) scm_gc_free(oldarray, 0, GUILE_ALLOC_NAME);  // should never happen?
     }
     return savings;
 }
@@ -2972,10 +2985,10 @@ int array_container_shrink_to_fit(array_container_t *src) {
 /* Free memory. */
 void array_container_free(array_container_t *arr) {
     if(arr->array != NULL) {// Jon Strabala reports that some tools complain otherwise
-      free(arr->array);
+      scm_gc_free(arr->array, 0, GUILE_ALLOC_NAME);
       arr->array = NULL; // pedantic
     }
-    free(arr);
+    scm_gc_free(arr, 0, GUILE_ALLOC_NAME);
 }
 
 static inline int32_t grow_capacity(int32_t capacity) {
@@ -2995,19 +3008,22 @@ void array_container_grow(array_container_t *container, int32_t min,
     int32_t max = (min <= DEFAULT_MAX_SIZE ? DEFAULT_MAX_SIZE : 65536);
     int32_t new_capacity = clamp(grow_capacity(container->capacity), min, max);
 
+    int old_capacity = container->capacity;
     container->capacity = new_capacity;
     uint16_t *array = container->array;
 
     if (preserve) {
         container->array =
-            (uint16_t *)realloc(array, new_capacity * sizeof(uint16_t));
-        if (container->array == NULL) free(array);
+            (uint16_t *)scm_gc_realloc(
+                array, old_capacity * sizeof(uint16_t),
+                new_capacity * sizeof(uint16_t), GUILE_ALLOC_NAME);
+        if (container->array == NULL) scm_gc_free(array, 0, GUILE_ALLOC_NAME);
     } else {
         // Jon Strabala reports that some tools complain otherwise
         if (array != NULL) {
-          free(array);
+            scm_gc_free(array, 0, GUILE_ALLOC_NAME);
         }
-        container->array = (uint16_t *)malloc(new_capacity * sizeof(uint16_t));
+        container->array = (uint16_t *)scm_gc_malloc_pointerless(new_capacity * sizeof(uint16_t), GUILE_ALLOC_NAME);
     }
 
     //  handle the case where realloc fails
@@ -3318,7 +3334,7 @@ void *array_container_deserialize(const char *buf, size_t buf_len) {
     else
         buf_len -= 2;
 
-    if ((ptr = (array_container_t *)malloc(sizeof(array_container_t))) !=
+    if ((ptr = (array_container_t *)scm_gc_malloc(sizeof(array_container_t), GUILE_ALLOC_NAME)) !=
         NULL) {
         size_t len;
         int32_t off;
@@ -3330,13 +3346,13 @@ void *array_container_deserialize(const char *buf, size_t buf_len) {
         len = sizeof(uint16_t) * ptr->cardinality;
 
         if (len != buf_len) {
-            free(ptr);
+            scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
             return (NULL);
         }
 
-        if ((ptr->array = (uint16_t *)malloc(sizeof(uint16_t) *
-                                             ptr->capacity)) == NULL) {
-            free(ptr);
+        if ((ptr->array = (uint16_t *)scm_gc_malloc_pointerless(sizeof(uint16_t) *
+                                                    ptr->capacity, GUILE_ALLOC_NAME)) == NULL) {
+            scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
             return (NULL);
         }
 
@@ -3345,8 +3361,8 @@ void *array_container_deserialize(const char *buf, size_t buf_len) {
         /* Check if returned values are monotonically increasing */
         for (int32_t i = 0, j = 0; i < ptr->cardinality; i++) {
             if (ptr->array[i] < j) {
-                free(ptr->array);
-                free(ptr);
+                scm_gc_free(ptr->array, 0, GUILE_ALLOC_NAME);
+                scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
                 return (NULL);
             } else
                 j = ptr->array[i];
@@ -3414,7 +3430,7 @@ void bitset_container_set_all(bitset_container_t *bitset) {
 /* Create a new bitset. Return NULL in case of failure. */
 bitset_container_t *bitset_container_create(void) {
     bitset_container_t *bitset =
-        (bitset_container_t *)malloc(sizeof(bitset_container_t));
+        (bitset_container_t *)scm_gc_malloc(sizeof(bitset_container_t), GUILE_ALLOC_NAME);
 
     if (!bitset) {
         return NULL;
@@ -3423,7 +3439,7 @@ bitset_container_t *bitset_container_create(void) {
     bitset->array = (uint64_t *)aligned_malloc(
         32, sizeof(uint64_t) * BITSET_CONTAINER_SIZE_IN_WORDS);
     if (!bitset->array) {
-        free(bitset);
+        scm_gc_free(bitset, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     bitset_container_clear(bitset);
@@ -3472,13 +3488,13 @@ void bitset_container_free(bitset_container_t *bitset) {
       aligned_free(bitset->array);
       bitset->array = NULL; // pedantic
     }
-    free(bitset);
+    scm_gc_free(bitset, 0, GUILE_ALLOC_NAME);
 }
 
 /* duplicate container. */
 bitset_container_t *bitset_container_clone(const bitset_container_t *src) {
     bitset_container_t *bitset =
-        (bitset_container_t *)malloc(sizeof(bitset_container_t));
+        (bitset_container_t *)scm_gc_malloc(sizeof(bitset_container_t), GUILE_ALLOC_NAME);
 
     if (!bitset) {
         return NULL;
@@ -3487,7 +3503,7 @@ bitset_container_t *bitset_container_clone(const bitset_container_t *src) {
     bitset->array = (uint64_t *)aligned_malloc(
         32, sizeof(uint64_t) * BITSET_CONTAINER_SIZE_IN_WORDS);
     if (!bitset->array) {
-        free(bitset);
+        scm_gc_free(bitset, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     bitset->cardinality = src->cardinality;
@@ -3915,12 +3931,12 @@ void* bitset_container_deserialize(const char *buf, size_t buf_len) {
   if(l != buf_len)
     return(NULL);
 
-  if((ptr = (bitset_container_t *)malloc(sizeof(bitset_container_t))) != NULL) {
+  if((ptr = (bitset_container_t *)scm_gc_malloc(sizeof(bitset_container_t), GUILE_ALLOC_NAME)) != NULL) {
     memcpy(ptr, buf, sizeof(bitset_container_t));
     // sizeof(__m256i) == 32
     ptr->array = (uint64_t *) aligned_malloc(32, l);
     if (! ptr->array) {
-        free(ptr);
+        scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     memcpy(ptr->array, buf, l);
@@ -4266,8 +4282,8 @@ void *get_copy_of_container(void *container, uint8_t *typecode,
         }
         assert(*typecode != SHARED_CONTAINER_TYPE_CODE);
 
-        if ((shared_container = (shared_container_t *)malloc(
-                 sizeof(shared_container_t))) == NULL) {
+        if ((shared_container = (shared_container_t *)scm_gc_malloc(
+                 sizeof(shared_container_t), GUILE_ALLOC_NAME)) == NULL) {
             return NULL;
         }
 
@@ -4319,7 +4335,7 @@ void *shared_container_extract_copy(shared_container_t *container,
     if (container->counter == 0) {
         answer = container->container;
         container->container = NULL;  // paranoid
-        free(container);
+        scm_gc_free(container, 0, GUILE_ALLOC_NAME);
     } else {
         answer = container_clone(container->container, *typecode);
     }
@@ -4334,7 +4350,7 @@ void shared_container_free(shared_container_t *container) {
         assert(container->typecode != SHARED_CONTAINER_TYPE_CODE);
         container_free(container->container, container->typecode);
         container->container = NULL;  // paranoid
-        free(container);
+        scm_gc_free(container, 0, GUILE_ALLOC_NAME);
     }
 }
 
@@ -6754,13 +6770,13 @@ bool run_container_add(run_container_t *run, uint16_t pos) {
 run_container_t *run_container_create_given_capacity(int32_t size) {
     run_container_t *run;
     /* Allocate the run container itself. */
-    if ((run = (run_container_t *)malloc(sizeof(run_container_t))) == NULL) {
+    if ((run = (run_container_t *)scm_gc_malloc(sizeof(run_container_t), GUILE_ALLOC_NAME)) == NULL) {
         return NULL;
     }
     if (size <= 0 ) { // we don't want to rely on malloc(0)
         run->runs = NULL;
-    } else if ((run->runs = (rle16_t *)malloc(sizeof(rle16_t) * size)) == NULL) {
-        free(run);
+    } else if ((run->runs = (rle16_t *)scm_gc_malloc_pointerless(sizeof(rle16_t) * size, GUILE_ALLOC_NAME)) == NULL) {
+        scm_gc_free(run, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     run->capacity = size;
@@ -6771,10 +6787,13 @@ run_container_t *run_container_create_given_capacity(int32_t size) {
 int run_container_shrink_to_fit(run_container_t *src) {
     if (src->n_runs == src->capacity) return 0;  // nothing to do
     int savings = src->capacity - src->n_runs;
+    int old_capacity = src->capacity;
     src->capacity = src->n_runs;
     rle16_t *oldruns = src->runs;
-    src->runs = (rle16_t *)realloc(oldruns, src->capacity * sizeof(rle16_t));
-    if (src->runs == NULL) free(oldruns);  // should never happen?
+    src->runs = (rle16_t *)scm_gc_realloc(
+        oldruns, old_capacity * sizeof(rle16_t),
+        src->capacity * sizeof(rle16_t), GUILE_ALLOC_NAME);
+    if (src->runs == NULL) scm_gc_free(oldruns, 0, GUILE_ALLOC_NAME);  // should never happen?
     return savings;
 }
 /* Create a new run container. Return NULL in case of failure. */
@@ -6794,13 +6813,14 @@ run_container_t *run_container_clone(const run_container_t *src) {
 /* Free memory. */
 void run_container_free(run_container_t *run) {
     if(run->runs != NULL) {// Jon Strabala reports that some tools complain otherwise
-      free(run->runs);
+        scm_gc_free(run->runs, 0, GUILE_ALLOC_NAME);
       run->runs = NULL;  // pedantic
     }
-    free(run);
+    scm_gc_free(run, 0, GUILE_ALLOC_NAME);
 }
 
 void run_container_grow(run_container_t *run, int32_t min, bool copy) {
+    int old_capacity = run->capacity;
     int32_t newCapacity =
         (run->capacity == 0)
             ? RUN_DEFAULT_INIT_SIZE
@@ -6813,14 +6833,16 @@ void run_container_grow(run_container_t *run, int32_t min, bool copy) {
     if (copy) {
         rle16_t *oldruns = run->runs;
         run->runs =
-            (rle16_t *)realloc(oldruns, run->capacity * sizeof(rle16_t));
-        if (run->runs == NULL) free(oldruns);
+            (rle16_t *)scm_gc_realloc(
+                oldruns, old_capacity * sizeof(rle16_t),
+                run->capacity * sizeof(rle16_t), GUILE_ALLOC_NAME);
+        if (run->runs == NULL) scm_gc_free(oldruns, 0, GUILE_ALLOC_NAME);
     } else {
         // Jon Strabala reports that some tools complain otherwise
         if (run->runs != NULL) {
-          free(run->runs);
+            scm_gc_free(run->runs, 0, GUILE_ALLOC_NAME);
         }
-        run->runs = (rle16_t *)malloc(run->capacity * sizeof(rle16_t));
+        run->runs = (rle16_t *)scm_gc_malloc_pointerless(run->capacity * sizeof(rle16_t), GUILE_ALLOC_NAME);
     }
     // handle the case where realloc fails
     if (run->runs == NULL) {
@@ -7342,7 +7364,7 @@ void *run_container_deserialize(const char *buf, size_t buf_len) {
     else
         buf_len -= 8;
 
-    if ((ptr = (run_container_t *)malloc(sizeof(run_container_t))) != NULL) {
+    if ((ptr = (run_container_t *)scm_gc_malloc(sizeof(run_container_t), GUILE_ALLOC_NAME)) != NULL) {
         size_t len;
         int32_t off;
 
@@ -7353,12 +7375,12 @@ void *run_container_deserialize(const char *buf, size_t buf_len) {
         len = sizeof(rle16_t) * ptr->n_runs;
 
         if (len != buf_len) {
-            free(ptr);
+            scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
             return (NULL);
         }
 
-        if ((ptr->runs = (rle16_t *)malloc(len)) == NULL) {
-            free(ptr);
+        if ((ptr->runs = (rle16_t *)scm_gc_malloc_pointerless(len, GUILE_ALLOC_NAME)) == NULL) {
+            scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
             return (NULL);
         }
 
@@ -7367,8 +7389,8 @@ void *run_container_deserialize(const char *buf, size_t buf_len) {
         /* Check if returned values are monotonically increasing */
         for (int32_t i = 0, j = 0; i < ptr->n_runs; i++) {
             if (ptr->runs[i].value < j) {
-                free(ptr->runs);
-                free(ptr);
+                scm_gc_free(ptr->runs, 0, GUILE_ALLOC_NAME);
+                scm_gc_free(ptr, 0, GUILE_ALLOC_NAME);
                 return (NULL);
             } else
                 j = ptr->runs[i].value;
@@ -7580,7 +7602,7 @@ static inline void *containerptr_roaring_bitmap_add(roaring_bitmap_t *r,
 
 roaring_bitmap_t *roaring_bitmap_create() {
     roaring_bitmap_t *ans =
-        (roaring_bitmap_t *)malloc(sizeof(roaring_bitmap_t));
+        (roaring_bitmap_t *)scm_gc_malloc(sizeof(roaring_bitmap_t), GUILE_ALLOC_NAME);
     if (!ans) {
         return NULL;
     }
@@ -7590,13 +7612,13 @@ roaring_bitmap_t *roaring_bitmap_create() {
 
 roaring_bitmap_t *roaring_bitmap_create_with_capacity(uint32_t cap) {
     roaring_bitmap_t *ans =
-        (roaring_bitmap_t *)malloc(sizeof(roaring_bitmap_t));
+        (roaring_bitmap_t *)scm_gc_malloc(sizeof(roaring_bitmap_t), GUILE_ALLOC_NAME);
     if (!ans) {
         return NULL;
     }
     bool is_ok = ra_init_with_capacity(&ans->high_low_container, cap);
     if (!is_ok) {
-        free(ans);
+        scm_gc_free(ans, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     return ans;
@@ -7890,14 +7912,14 @@ void roaring_bitmap_statistics(const roaring_bitmap_t *ra,
 
 roaring_bitmap_t *roaring_bitmap_copy(const roaring_bitmap_t *r) {
     roaring_bitmap_t *ans =
-        (roaring_bitmap_t *)malloc(sizeof(roaring_bitmap_t));
+        (roaring_bitmap_t *)scm_gc_malloc(sizeof(roaring_bitmap_t), GUILE_ALLOC_NAME);
     if (!ans) {
         return NULL;
     }
     bool is_ok = ra_copy(&r->high_low_container, &ans->high_low_container,
                          is_cow(r));
     if (!is_ok) {
-        free(ans);
+        scm_gc_free(ans, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     roaring_bitmap_set_copy_on_write(ans, is_cow(r));
@@ -7914,7 +7936,7 @@ void roaring_bitmap_free(const roaring_bitmap_t *r) {
     if (!is_frozen(r)) {
       ra_clear((roaring_array_t*)&r->high_low_container);
     }
-    free((roaring_bitmap_t*)r);
+    scm_gc_free((roaring_bitmap_t*)r, 0, GUILE_ALLOC_NAME);
 }
 
 void roaring_bitmap_clear(roaring_bitmap_t *r) {
@@ -8866,7 +8888,7 @@ size_t roaring_bitmap_portable_size_in_bytes(const roaring_bitmap_t *ra) {
 
 roaring_bitmap_t *roaring_bitmap_portable_deserialize_safe(const char *buf, size_t maxbytes) {
     roaring_bitmap_t *ans =
-        (roaring_bitmap_t *)malloc(sizeof(roaring_bitmap_t));
+        (roaring_bitmap_t *)scm_gc_malloc(sizeof(roaring_bitmap_t), GUILE_ALLOC_NAME);
     if (ans == NULL) {
         return NULL;
     }
@@ -8875,7 +8897,7 @@ roaring_bitmap_t *roaring_bitmap_portable_deserialize_safe(const char *buf, size
     if(is_ok) assert(bytesread <= maxbytes);
     roaring_bitmap_set_copy_on_write(ans, false);
     if (!is_ok) {
-        free(ans);
+        scm_gc_free(ans, 0, GUILE_ALLOC_NAME);
         return NULL;
     }
     return ans;
@@ -9091,7 +9113,7 @@ void roaring_init_iterator_last(const roaring_bitmap_t *ra,
 
 roaring_uint32_iterator_t *roaring_create_iterator(const roaring_bitmap_t *ra) {
     roaring_uint32_iterator_t *newit =
-        (roaring_uint32_iterator_t *)malloc(sizeof(roaring_uint32_iterator_t));
+        (roaring_uint32_iterator_t *)scm_gc_malloc(sizeof(roaring_uint32_iterator_t), GUILE_ALLOC_NAME);
     if (newit == NULL) return NULL;
     roaring_init_iterator(ra, newit);
     return newit;
@@ -9100,7 +9122,7 @@ roaring_uint32_iterator_t *roaring_create_iterator(const roaring_bitmap_t *ra) {
 roaring_uint32_iterator_t *roaring_copy_uint32_iterator(
     const roaring_uint32_iterator_t *it) {
     roaring_uint32_iterator_t *newit =
-        (roaring_uint32_iterator_t *)malloc(sizeof(roaring_uint32_iterator_t));
+        (roaring_uint32_iterator_t *)scm_gc_malloc(sizeof(roaring_uint32_iterator_t), GUILE_ALLOC_NAME);
     memcpy(newit, it, sizeof(roaring_uint32_iterator_t));
     return newit;
 }
@@ -10405,7 +10427,7 @@ roaring_bitmap_frozen_view(const char *buf, size_t length) {
     alloc_size += num_run_containers * sizeof(run_container_t);
     alloc_size += num_array_containers * sizeof(array_container_t);
 
-    char *arena = (char *)malloc(alloc_size);
+    char *arena = (char *)scm_gc_malloc_pointerless(alloc_size, GUILE_ALLOC_NAME);
     if (arena == NULL) {
         return NULL;
     }
@@ -10500,7 +10522,7 @@ if (!ra->keys || !ra->containers || !ra->typecodes) {
 }*/
 
     if ( new_capacity == 0 ) {
-      free(ra->containers);
+        scm_gc_free(ra->containers, 0, GUILE_ALLOC_NAME);
       ra->containers = NULL;
       ra->keys = NULL;
       ra->typecodes = NULL;
@@ -10509,7 +10531,7 @@ if (!ra->keys || !ra->containers || !ra->typecodes) {
     }
     const size_t memoryneeded =
         new_capacity * (sizeof(uint16_t) + sizeof(void *) + sizeof(uint8_t));
-    void *bigalloc = malloc(memoryneeded);
+    void *bigalloc = scm_gc_malloc_pointerless(memoryneeded, GUILE_ALLOC_NAME);
     if (!bigalloc) return false;
     void *oldbigalloc = ra->containers;
     void **newcontainers = (void **)bigalloc;
@@ -10526,7 +10548,7 @@ if (!ra->keys || !ra->containers || !ra->typecodes) {
     ra->keys = newkeys;
     ra->typecodes = newtypecodes;
     ra->allocation_size = new_capacity;
-    free(oldbigalloc);
+    scm_gc_free(oldbigalloc, 0, GUILE_ALLOC_NAME);
     return true;
 }
 
@@ -10538,7 +10560,7 @@ bool ra_init_with_capacity(roaring_array_t *new_ra, uint32_t cap) {
 
     if(cap > 0) {
       void *bigalloc =
-        malloc(cap * (sizeof(uint16_t) + sizeof(void *) + sizeof(uint8_t)));
+          scm_gc_malloc_pointerless(cap * (sizeof(uint16_t) + sizeof(void *) + sizeof(uint8_t)), GUILE_ALLOC_NAME);
       if( bigalloc == NULL ) return false;
       new_ra->containers = (void **)bigalloc;
       new_ra->keys = (uint16_t *)(new_ra->containers + cap);
@@ -10663,7 +10685,7 @@ void ra_reset(roaring_array_t *ra) {
 }
 
 void ra_clear_without_containers(roaring_array_t *ra) {
-    free(ra->containers);    // keys and typecodes are allocated with containers
+    scm_gc_free(ra->containers, 0, GUILE_ALLOC_NAME);    // keys and typecodes are allocated with containers
     ra->size = 0;
     ra->allocation_size = 0;
     ra->containers = NULL;
@@ -10981,7 +11003,7 @@ bool ra_range_uint32_array(const roaring_array_t *ra, size_t offset, size_t limi
                 //first_skip = t_limit - (ctr + t_limit - offset);
                 first_skip = offset - ctr;
                 first = true;
-                t_ans = (uint32_t *)malloc(sizeof(*t_ans) * (first_skip + limit));
+                t_ans = (uint32_t *)scm_gc_malloc_pointerless(sizeof(*t_ans) * (first_skip + limit), GUILE_ALLOC_NAME);
                 if(t_ans == NULL) {
                   return false;
                 }
@@ -10989,15 +11011,15 @@ bool ra_range_uint32_array(const roaring_array_t *ra, size_t offset, size_t limi
                 cur_len = first_skip + limit;
             }
             if (dtr + t_limit > cur_len){
-                uint32_t * append_ans = (uint32_t *)malloc(sizeof(*append_ans) * (cur_len + t_limit));
+                uint32_t * append_ans = (uint32_t *)scm_gc_malloc_pointerless(sizeof(*append_ans) * (cur_len + t_limit), GUILE_ALLOC_NAME);
                 if(append_ans == NULL) {
-                  if(t_ans != NULL) free(t_ans);
+                  if(t_ans != NULL) scm_gc_free(t_ans, 0, GUILE_ALLOC_NAME);
                   return false;
                 }
                 memset(append_ans, 0, sizeof(*append_ans) * (cur_len + t_limit));
                 cur_len = cur_len + t_limit;
                 memcpy(append_ans, t_ans, dtr * sizeof(uint32_t));
-                free(t_ans);
+                scm_gc_free(t_ans, 0, GUILE_ALLOC_NAME);
                 t_ans = append_ans;
             }
             switch (ra->typecodes[i]) {
@@ -11024,7 +11046,7 @@ bool ra_range_uint32_array(const roaring_array_t *ra, size_t offset, size_t limi
     }
     if(t_ans != NULL) {
       memcpy(ans, t_ans+first_skip, limit * sizeof(uint32_t));
-      free(t_ans);
+      scm_gc_free(t_ans, 0, GUILE_ALLOC_NAME);
     }
     return true;
 }
@@ -11079,7 +11101,7 @@ size_t ra_portable_serialize(const roaring_array_t *ra, char *buf) {
         }
         memcpy(buf, bitmapOfRunContainers, s);
         buf += s;
-        free(bitmapOfRunContainers);
+        scm_gc_free(bitmapOfRunContainers, 0, GUILE_ALLOC_NAME);
         if (ra->size < NO_OFFSET_THRESHOLD) {
             startOffset = 4 + 4 * ra->size + s;
         } else {
@@ -11411,9 +11433,9 @@ static void pq_add(roaring_pq_t *pq, roaring_pq_element_t *t) {
 }
 
 static void pq_free(roaring_pq_t *pq) {
-    free(pq->elements);
+    scm_gc_free(pq->elements, 0, GUILE_ALLOC_NAME);
     pq->elements = NULL;  // paranoid
-    free(pq);
+    scm_gc_free(pq, 0, GUILE_ALLOC_NAME);
 }
 
 static void percolate_down(roaring_pq_t *pq, uint32_t i) {
@@ -11440,9 +11462,9 @@ static void percolate_down(roaring_pq_t *pq, uint32_t i) {
 }
 
 static roaring_pq_t *create_pq(const roaring_bitmap_t **arr, uint32_t length) {
-    roaring_pq_t *answer = (roaring_pq_t *)malloc(sizeof(roaring_pq_t));
+    roaring_pq_t *answer = (roaring_pq_t *)scm_gc_malloc(sizeof(roaring_pq_t), GUILE_ALLOC_NAME);
     answer->elements =
-        (roaring_pq_element_t *)malloc(sizeof(roaring_pq_element_t) * length);
+        (roaring_pq_element_t *)scm_gc_malloc_pointerless(sizeof(roaring_pq_element_t) * length, GUILE_ALLOC_NAME);
     answer->size = length;
     for (uint32_t i = 0; i < length; i++) {
         answer->elements[i].bitmap = (roaring_bitmap_t *)arr[i];
@@ -11558,8 +11580,8 @@ static roaring_bitmap_t *lazy_or_from_lazy_inputs(roaring_bitmap_t *x1,
     }
     ra_clear_without_containers(&x1->high_low_container);
     ra_clear_without_containers(&x2->high_low_container);
-    free(x1);
-    free(x2);
+    scm_gc_free(x1, 0, GUILE_ALLOC_NAME);
+    scm_gc_free(x2, 0, GUILE_ALLOC_NAME);
     return answer;
 }
 

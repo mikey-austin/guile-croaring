@@ -40,7 +40,7 @@ enum {
 #if !(defined(__APPLE__)) && !(defined(__FreeBSD__))
 #include <malloc.h>  // this should never be needed but there are some reports that it is needed.
 #endif
-
+#include <libguile.h>
 
 #if defined(_MSC_VER) && !defined(__clang__) && !defined(_WIN64) && !defined(ROARING_ACK_32BIT)
 #pragma message( \
@@ -210,6 +210,10 @@ static inline void *aligned_malloc(size_t alignment, size_t size) {
     // implicit defined warning.
     if (posix_memalign(&p, alignment, size) != 0) return NULL;
 #endif
+
+    // Register the allocated memory with guile's garbage collector.
+    scm_gc_register_allocation(size);
+
     return p;
 }
 
