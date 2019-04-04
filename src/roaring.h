@@ -211,7 +211,10 @@ static inline void *aligned_malloc(size_t alignment, size_t size) {
     if (posix_memalign(&p, alignment, size) != 0) return NULL;
 #endif
 
-    // Register the allocated memory with guile's garbage collector.
+    // Register the allocated memory size with guile's garbage collector. Note
+    // this will leak memory if a finalizer is not used. Ideally we can find a
+    // way to get guile to manage this memory and preserve the semantics of
+    // posix_memalign.
     scm_gc_register_allocation(size);
 
     return p;
