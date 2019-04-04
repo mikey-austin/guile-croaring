@@ -16,3 +16,4 @@ Makefile
 *.o
 stamp-h1
 autoscan.log
+libtool
